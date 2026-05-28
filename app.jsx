@@ -35,6 +35,7 @@ function App() {
   const [prodDrawer, setProdDrawer] = useState({ open: false, editing: null });
   const [cliDrawer, setCliDrawer] = useState({ open: false, editing: null });
   const [supDrawer, setSupDrawer] = useState({ open: false, editing: null });
+  const [exportOpen, setExportOpen] = useState(false);
 
   // Confirm dialog -------------------------------------------
   const [confirm, setConfirm] = useState(null);
@@ -130,19 +131,7 @@ function App() {
   }, [flash]);
 
   // ---- Export ---------------------------------------------
-  const handleExport = useCallback((scope, override) => {
-    let txs = transactions;
-    if (scope === 'periodo') {
-      const start = startOfPeriod(anchor, period);
-      const end = endOfPeriod(anchor, period);
-      txs = transactions.filter((t) => { const d = new Date(t.fecha + 'T00:00:00'); return d >= start && d < end; });
-    } else if (scope === 'filtrado' && Array.isArray(override)) {
-      txs = override;
-    }
-    if (txs.length === 0) { flash('No hay movimientos para exportar.'); return; }
-    exportTransactions(txs, products, clients);
-    flash(`${txs.length} movimientos exportados a CSV.`);
-  }, [transactions, products, clients, anchor, period, flash]);
+  const openExport = useCallback(() => setExportOpen(true), []);
 
   // ---- Reset all data -------------------------------------
   function handleReset() {
@@ -201,6 +190,7 @@ function App() {
         view={view} setView={setView}
         dataCount={totalCount}
         onOpenAdd={() => setTxDrawer({ open: true, editing: null })}
+        onOpenExport={openExport}
       />
 
       <main className="main">
@@ -211,7 +201,6 @@ function App() {
             onOpenAdd={() => setTxDrawer({ open: true, editing: null })}
             onEdit={(tx) => setTxDrawer({ open: true, editing: tx })}
             onDelete={askDeleteTx}
-            onExport={handleExport}
           />
         )}
         {view === 'movs' && (
@@ -220,7 +209,7 @@ function App() {
             onOpenAdd={() => setTxDrawer({ open: true, editing: null })}
             onEdit={(tx) => setTxDrawer({ open: true, editing: tx })}
             onDelete={askDeleteTx}
-            onExport={handleExport}
+            onOpenExport={openExport}
           />
         )}
         {view === 'inv' && (
@@ -246,7 +235,6 @@ function App() {
           <ReportesView
             transactions={transactions} products={products} clients={clients}
             period={period} setPeriod={setPeriod} anchor={anchor} setAnchor={setAnchor}
-            onExport={handleExport}
           />
         )}
 
@@ -279,6 +267,12 @@ function App() {
         open={supDrawer.open} editing={supDrawer.editing}
         onClose={() => setSupDrawer({ open: false, editing: null })}
         onSave={saveSupplier}
+      />
+      <ExportDrawer
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        transactions={transactions} products={products} clients={clients}
+        onToast={flash}
       />
 
       <ConfirmDialog

@@ -275,6 +275,65 @@ function exportTransactions(txs, products, clients) {
   downloadCSV(`life-manager_movimientos_${todayISO()}.csv`, rows);
 }
 
+// ---- Excel (.xls) export -----------------------------------
+// Uses HTML/SpreadsheetML — opens cleanly in Excel, Numbers, Google Sheets.
+function downloadXLS(filename, sheetName, rows) {
+  const escape = (v) => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const headerRow = rows[0] || [];
+  const bodyRows = rows.slice(1);
+  const thead = '<tr>' + headerRow.map((h) => `<th>${escape(h)}</th>`).join('') + '</tr>';
+  const tbody = bodyRows.map((r) => '<tr>' + r.map((cell) => {
+    const isNumber = typeof cell === 'number' || (typeof cell === 'string' && /^-?\d+(?:\.\d+)?$/.test(cell) && cell !== '');
+    return isNumber
+      ? `<td x:num="${escape(cell)}" style="mso-number-format:'0.00'">${escape(cell)}</td>`
+      : `<td>${escape(cell)}</td>`;
+  }).join('') + '</tr>').join('');
+
+  const html = `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:x="urn:schemas-microsoft-com:office:excel"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<!--[if gte mso 9]><xml>
+  <x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
+    <x:Name>${escape(sheetName)}</x:Name>
+    <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+  </x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook>
+</xml><![endif]-->
+<style>
+  table { border-collapse: collapse; }
+  th { background:#F2F0EA; text-align:left; padding:4px 8px; border:1px solid #C8C4BB; font-weight:600; }
+  td { padding:4px 8px; border:1px solid #E2DED4; }
+</style>
+</head><body>
+<table>${thead}${tbody}</table>
+</body></html>`;
+
+  const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// Build rows + dispatch to the right exporter
+function exportMovements({ format, txs, products, clients, sheetName, filenameBase }) {
+  const pMap = Object.fromEntries(products.map((p) => [p.id, p.nombre]));
+  const cMap = Object.fromEntries(clients.map((c) => [c.id, c.nombre]));
+  const header = ['Fecha', 'Tipo', 'Categoría', 'Concepto', 'Monto USD', 'Producto', 'Cantidad', 'Cliente', 'Notas'];
+  const rows = [header, ...txs.map((t) => [
+    t.fecha, t.tipo, categoryLabel(t.tipo, t.categoria), t.concepto, t.monto.toFixed(2),
+    t.productoId ? pMap[t.productoId] || '' : '', t.cantidad || '',
+    t.clienteId ? cMap[t.clienteId] || '' : '', t.nota || '',
+  ])];
+  const base = filenameBase || `life-manager_movimientos_${todayISO()}`;
+  if (format === 'xls') downloadXLS(`${base}.xls`, sheetName || 'Movimientos', rows);
+  else downloadCSV(`${base}.csv`, rows);
+}
+
 Object.assign(window, {
   STORAGE_KEY, TODAY, CATEGORIES, categoryLabel,
   emptyState, loadState, saveState, newId,
@@ -282,5 +341,5 @@ Object.assign(window, {
   formatPeriodLabel, formatDate, formatDateFull, todayISO,
   money, moneyCompact, aggregate, chartBuckets, sparkSeries,
   MONTHS, MONTHS_SHORT, WEEKDAYS_SHORT,
-  downloadCSV, exportTransactions,
+  downloadCSV, exportTransactions, downloadXLS, exportMovements,
 });

@@ -52,7 +52,7 @@ function Sparkline({ values, height = 28, stroke = 'var(--ink)', fill = false })
 }
 
 // ---- Header with nav ---------------------------------------
-function Header({ view, setView, dataCount, onOpenAdd }) {
+function Header({ view, setView, dataCount, onOpenAdd, onOpenExport }) {
   const links = [
     { id: 'resumen',   label: 'Resumen' },
     { id: 'movs',      label: 'Movimientos' },
@@ -80,6 +80,10 @@ function Header({ view, setView, dataCount, onOpenAdd }) {
         </nav>
         <div className="header-actions">
           <span className="header-count">{dataCount.toLocaleString('es-ES')} movs</span>
+          <button className="btn-ghost header-export" onClick={onOpenExport} title="Exportar a Excel o CSV">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v8M3.5 6L7 9.5 10.5 6M2 12h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Exportar
+          </button>
           <button className="btn-primary header-add" onClick={onOpenAdd}>
             <span aria-hidden="true">+</span> Nueva transacción
           </button>
@@ -90,14 +94,13 @@ function Header({ view, setView, dataCount, onOpenAdd }) {
 }
 
 // ---- Period bar --------------------------------------------
-function PeriodBar({ period, setPeriod, anchor, setAnchor, label, eyebrow, onExport, showExportButton = true }) {
+function PeriodBar({ period, setPeriod, anchor, setAnchor, label, eyebrow }) {
   const periods = [
     { id: 'dia', label: 'Día' },
     { id: 'semana', label: 'Semana' },
     { id: 'mes', label: 'Mes' },
     { id: 'anio', label: 'Año' },
   ];
-  const [showExport, setShowExport] = useState(false);
   const isToday = +startOfPeriod(anchor, period) === +startOfPeriod(TODAY, period);
 
   return (
@@ -128,23 +131,6 @@ function PeriodBar({ period, setPeriod, anchor, setAnchor, label, eyebrow, onExp
           >Hoy</button>
           <button className="icon-btn" onClick={() => setAnchor(shiftPeriod(anchor, period, 1))} aria-label="Siguiente">›</button>
         </div>
-        {showExportButton && (
-          <div className="export-wrap">
-            <button className="btn-ghost" onClick={() => setShowExport((v) => !v)}>
-              Exportar CSV
-            </button>
-            {showExport && (
-              <div className="menu" onMouseLeave={() => setShowExport(false)}>
-                <button className="menu-item" onClick={() => { setShowExport(false); onExport('periodo'); }}>
-                  Solo este periodo
-                </button>
-                <button className="menu-item" onClick={() => { setShowExport(false); onExport('todo'); }}>
-                  Todos los movimientos
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </section>
   );
@@ -752,9 +738,192 @@ function SupplierDrawer({ open, onClose, onSave, editing }) {
   );
 }
 
+// ---- Export drawer -----------------------------------------
+function ExportDrawer({ open, onClose, transactions, products, clients, onToast }) {
+  const [format, setFormat] = useState('xls');
+  const [preset, setPreset] = useState('mes');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [tipo, setTipo] = useState('todos');
+
+  // Compute date range from preset
+  useEffect(() => {
+    if (preset === 'personalizado') return;
+    const today = new Date(TODAY);
+    let s, e;
+    if (preset === 'hoy') { s = today; e = today; }
+    else if (preset === 'semana') {
+      s = startOfPeriod(today, 'semana');
+      e = new Date(endOfPeriod(today, 'semana').getTime() - 86400000);
+    }
+    else if (preset === 'mes') {
+      s = startOfPeriod(today, 'mes');
+      e = new Date(endOfPeriod(today, 'mes').getTime() - 86400000);
+    }
+    else if (preset === 'mes_pasado') {
+      const prev = shiftPeriod(today, 'mes', -1);
+      s = startOfPeriod(prev, 'mes');
+      e = new Date(endOfPeriod(prev, 'mes').getTime() - 86400000);
+    }
+    else if (preset === 'anio') {
+      s = startOfPeriod(today, 'anio');
+      e = new Date(endOfPeriod(today, 'anio').getTime() - 86400000);
+    }
+    else if (preset === 'todo') { s = null; e = null; }
+    setFrom(s ? s.toISOString().slice(0,10) : '');
+    setTo(e ? e.toISOString().slice(0,10) : '');
+  }, [preset, open]);
+
+  // Filtered transactions
+  const filtered = useMemo(() => {
+    return transactions.filter((t) => {
+      if (tipo !== 'todos' && t.tipo !== tipo) return false;
+      if (from && t.fecha < from) return false;
+      if (to && t.fecha > to) return false;
+      return true;
+    });
+  }, [transactions, tipo, from, to]);
+
+  // Summary
+  const summary = useMemo(() => {
+    let i = 0, g = 0, v = 0;
+    for (const t of filtered) {
+      if (t.tipo === 'ingreso') i += t.monto;
+      else if (t.tipo === 'gasto') g += t.monto;
+      else if (t.tipo === 'venta') v += t.monto;
+    }
+    return { i, g, v, count: filtered.length };
+  }, [filtered]);
+
+  function buildFilename() {
+    const parts = ['life-manager', tipo === 'todos' ? 'movimientos' : tipo];
+    if (from && to) parts.push(`${from}_a_${to}`);
+    else if (from) parts.push(`desde_${from}`);
+    else if (to) parts.push(`hasta_${to}`);
+    else parts.push('todo');
+    return parts.join('_');
+  }
+
+  function handleExport() {
+    if (filtered.length === 0) {
+      onToast && onToast('No hay movimientos en ese rango.');
+      return;
+    }
+    exportMovements({
+      format, txs: filtered, products, clients,
+      sheetName: 'Movimientos',
+      filenameBase: buildFilename(),
+    });
+    onToast && onToast(`${filtered.length} movimientos exportados a ${format === 'xls' ? 'Excel' : 'CSV'}.`);
+    onClose();
+  }
+
+  const presets = [
+    { id: 'hoy', label: 'Hoy' },
+    { id: 'semana', label: 'Esta semana' },
+    { id: 'mes', label: 'Este mes' },
+    { id: 'mes_pasado', label: 'Mes pasado' },
+    { id: 'anio', label: 'Este año' },
+    { id: 'todo', label: 'Todo' },
+    { id: 'personalizado', label: 'Personalizado' },
+  ];
+
+  return (
+    <>
+      <div className={classNames('drawer-scrim', open && 'is-open')} onClick={onClose} />
+      <aside className={classNames('drawer', open && 'is-open')} aria-hidden={!open}>
+        <header className="drawer-head">
+          <div>
+            <div className="drawer-eyebrow">Exportar</div>
+            <div className="drawer-title">Descargar movimientos</div>
+          </div>
+          <button className="icon-btn close" onClick={onClose} aria-label="Cerrar">×</button>
+        </header>
+        <div className="drawer-body">
+          <div className="field">
+            <label>Formato</label>
+            <div className="format-toggle">
+              <button
+                className={classNames('format-btn', format === 'xls' && 'is-active')}
+                onClick={() => setFormat('xls')}
+              >
+                <span className="format-ext">XLS</span>
+                <span className="format-name">Excel</span>
+                <span className="format-desc">Abre en Microsoft Excel, Numbers o Google Sheets</span>
+              </button>
+              <button
+                className={classNames('format-btn', format === 'csv' && 'is-active')}
+                onClick={() => setFormat('csv')}
+              >
+                <span className="format-ext">CSV</span>
+                <span className="format-name">Valores separados</span>
+                <span className="format-desc">Universal · funciona en cualquier hoja de cálculo</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Periodo</label>
+            <div className="preset-grid">
+              {presets.map((p) => (
+                <button
+                  key={p.id}
+                  className={classNames('preset-btn', preset === p.id && 'is-active')}
+                  onClick={() => setPreset(p.id)}
+                >{p.label}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field-row">
+            <div className="field">
+              <label>Desde</label>
+              <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPreset('personalizado'); }} />
+            </div>
+            <div className="field">
+              <label>Hasta</label>
+              <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPreset('personalizado'); }} />
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Tipo de movimiento</label>
+            <div className="chip-row">
+              {[['todos','Todos'],['ingreso','Ingresos'],['gasto','Gastos'],['venta','Ventas']].map(([id, label]) => (
+                <button key={id} className={classNames('chip', tipo === id && 'is-active')} onClick={() => setTipo(id)}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="export-summary">
+            <div className="export-summary-head">
+              <span className="card-eyebrow">Selección</span>
+              <span className="summary-count">{summary.count} {summary.count === 1 ? 'movimiento' : 'movimientos'}</span>
+            </div>
+            <div className="export-summary-grid">
+              <div><span className="ts-label">Ingresos</span><span className="ts-value">{money(summary.i)}</span></div>
+              <div><span className="ts-label">Gastos</span><span className="ts-value">{money(summary.g)}</span></div>
+              <div><span className="ts-label">Ventas</span><span className="ts-value">{money(summary.v)}</span></div>
+              <div><span className="ts-label">Balance</span><span className={classNames('ts-value', (summary.i + summary.v - summary.g) < 0 && 'is-neg')}>{money(summary.i + summary.v - summary.g)}</span></div>
+            </div>
+          </div>
+        </div>
+        <footer className="drawer-foot">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" onClick={handleExport} disabled={summary.count === 0}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{marginRight: 2}}><path d="M7 1.5v8M3.5 6L7 9.5 10.5 6M2 12h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Descargar {format === 'xls' ? 'Excel' : 'CSV'}
+          </button>
+        </footer>
+      </aside>
+    </>
+  );
+}
+
 Object.assign(window, {
   classNames, Delta, Sparkline,
   Header, PeriodBar, KPIRow, KPICard, FlowChart, CategoriesPanel,
   Toast, ConfirmDialog,
   TransactionDrawer, ProductDrawer, ClientDrawer, SupplierDrawer,
+  ExportDrawer,
 });

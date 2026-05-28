@@ -25,7 +25,7 @@ function EmptyState({ title, body, action }) {
 // 1. Resumen
 // ============================================================
 function ResumenView(props) {
-  const { transactions, products, clients, period, setPeriod, anchor, setAnchor, onOpenAdd, onEdit, onDelete, onExport } = props;
+  const { transactions, products, clients, period, setPeriod, anchor, setAnchor, onOpenAdd, onEdit, onDelete } = props;
   const stats = useMemoV(() => aggregate(transactions, anchor, period), [transactions, anchor, period]);
   const buckets = useMemoV(() => chartBuckets(transactions, anchor, period), [transactions, anchor, period]);
   const sparks = useMemoV(() => ({
@@ -36,11 +36,20 @@ function ResumenView(props) {
   }), [transactions, period]);
   const periodLabel = formatPeriodLabel(anchor, period);
 
+  // ⚠️ All hooks MUST be called before any early return — rules of hooks.
+  const recent = useMemoV(() => {
+    const start = startOfPeriod(anchor, period);
+    const end = endOfPeriod(anchor, period);
+    return transactions
+      .filter((t) => { const d = new Date(t.fecha + 'T00:00:00'); return d >= start && d < end; })
+      .slice(0, 8);
+  }, [transactions, anchor, period]);
+
   if (transactions.length === 0) {
     return (
       <>
         <PeriodBar period={period} setPeriod={setPeriod} anchor={anchor} setAnchor={setAnchor}
-          label={periodLabel} eyebrow="Resumen" onExport={onExport} showExportButton={false} />
+          label={periodLabel} eyebrow="Resumen" />
         <EmptyState
           title="Aún no tienes movimientos"
           body="Empieza registrando tu primer ingreso, gasto o venta. Aquí verás tu balance, gráficos y categorías en cuanto agregues datos."
@@ -50,19 +59,10 @@ function ResumenView(props) {
     );
   }
 
-  // Recent (last 8) for dashboard table
-  const recent = useMemoV(() => {
-    const start = startOfPeriod(anchor, period);
-    const end = endOfPeriod(anchor, period);
-    return transactions
-      .filter((t) => { const d = new Date(t.fecha + 'T00:00:00'); return d >= start && d < end; })
-      .slice(0, 8);
-  }, [transactions, anchor, period]);
-
   return (
     <>
       <PeriodBar period={period} setPeriod={setPeriod} anchor={anchor} setAnchor={setAnchor}
-        label={periodLabel} eyebrow="Resumen" onExport={onExport} />
+        label={periodLabel} eyebrow="Resumen" />
       <KPIRow stats={stats} sparks={sparks} />
       <section className="row row-chart">
         <FlowChart buckets={buckets} hasData={stats.count > 0} />
@@ -149,7 +149,7 @@ function MovementsTable({ txs, products, clients, onEdit, onDelete, compact }) {
 // 2. Movimientos (full)
 // ============================================================
 function MovimientosView(props) {
-  const { transactions, products, clients, onOpenAdd, onEdit, onDelete, onExport } = props;
+  const { transactions, products, clients, onOpenAdd, onEdit, onDelete } = props;
   const [filter, setFilter] = useStateV('todos');
   const [query, setQuery] = useStateV('');
   const [dateFrom, setDateFrom] = useStateV('');
@@ -184,7 +184,10 @@ function MovimientosView(props) {
           <h1 className="page-title">movimientos</h1>
         </div>
         <div className="action-bar-right">
-          <button className="btn-ghost" onClick={() => onExport('filtrado', filtered)}>Exportar CSV</button>
+          <button className="btn-ghost" onClick={() => props.onOpenExport && props.onOpenExport()}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{marginRight: 4}}><path d="M7 1.5v8M3.5 6L7 9.5 10.5 6M2 12h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Exportar
+          </button>
           <button className="btn-primary" onClick={onOpenAdd}><span>+</span> Nueva transacción</button>
         </div>
       </section>
@@ -493,7 +496,7 @@ function ContactosView(props) {
 // 5. Reportes
 // ============================================================
 function ReportesView(props) {
-  const { transactions, products, clients, period, setPeriod, anchor, setAnchor, onExport } = props;
+  const { transactions, products, clients, period, setPeriod, anchor, setAnchor } = props;
   const stats = useMemoV(() => aggregate(transactions, anchor, period), [transactions, anchor, period]);
   const buckets = useMemoV(() => chartBuckets(transactions, anchor, period), [transactions, anchor, period]);
   const periodLabel = formatPeriodLabel(anchor, period);
@@ -558,7 +561,7 @@ function ReportesView(props) {
     return (
       <>
         <PeriodBar period={period} setPeriod={setPeriod} anchor={anchor} setAnchor={setAnchor}
-          label={periodLabel} eyebrow="Reportes" onExport={onExport} showExportButton={false} />
+          label={periodLabel} eyebrow="Reportes" />
         <EmptyState
           title="Aún no hay reportes"
           body="Cuando registres movimientos verás aquí tendencias, top productos y top clientes."
@@ -573,7 +576,7 @@ function ReportesView(props) {
   return (
     <>
       <PeriodBar period={period} setPeriod={setPeriod} anchor={anchor} setAnchor={setAnchor}
-        label={periodLabel} eyebrow="Reportes" onExport={onExport} />
+        label={periodLabel} eyebrow="Reportes" />
 
       <div className="kpi-row">
         <div className="kpi"><div className="kpi-label">Ingresos</div><div className="kpi-value">{money(stats.ingreso)}</div><Delta now={stats.ingreso} prev={stats.prev.ingreso} /></div>

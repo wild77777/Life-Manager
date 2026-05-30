@@ -13,7 +13,7 @@ function App() {
 
   // Persisted state ------------------------------------------
   const [state, setState] = useState(() => loadState());
-  const { transactions, products, clients, suppliers } = state;
+  const { transactions, products, clients, suppliers, crmClients, crmProjects, bankAccount } = state;
 
   useEffect(() => { saveState(state); }, [state]);
 
@@ -130,6 +130,88 @@ function App() {
     flash('Proveedor eliminado.');
   }, [flash]);
 
+  // ---- CRM mutations --------------------------------------
+  const saveCrmClient = useCallback((c, isEdit) => {
+    setState((s) => ({
+      ...s,
+      crmClients: isEdit ? s.crmClients.map((x) => (x.id === c.id ? c : x)) : [...s.crmClients, c],
+    }));
+    flash(isEdit ? 'Cliente actualizado.' : 'Cliente registrado.');
+  }, [flash]);
+
+  const deleteCrmClient = useCallback((id) => {
+    setState((s) => ({
+      ...s,
+      crmClients: s.crmClients.filter((x) => x.id !== id),
+      crmProjects: s.crmProjects.filter((p) => p.clienteId !== id),
+    }));
+    flash('Cliente y sus proyectos eliminados.');
+  }, [flash]);
+
+  const saveProject = useCallback((proj, isEdit, clienteId) => {
+    setState((s) => {
+      if (isEdit) return { ...s, crmProjects: s.crmProjects.map((p) => (p.id === proj.id ? proj : p)) };
+      return { ...s, crmProjects: [...s.crmProjects, { ...proj, clienteId: proj.clienteId || clienteId }] };
+    });
+    flash(isEdit ? 'Proyecto actualizado.' : 'Proyecto creado.');
+  }, [flash]);
+
+  const deleteProject = useCallback((id) => {
+    setState((s) => ({ ...s, crmProjects: s.crmProjects.filter((p) => p.id !== id) }));
+    flash('Proyecto eliminado.');
+  }, [flash]);
+
+  const changeProjectState = useCallback((id, estado) => {
+    setState((s) => ({ ...s, crmProjects: s.crmProjects.map((p) => (p.id === id ? { ...p, estado } : p)) }));
+  }, []);
+
+  const addPayment = useCallback((projectId, pago) => {
+    setState((s) => ({
+      ...s,
+      crmProjects: s.crmProjects.map((p) => p.id === projectId ? { ...p, pagos: [...(p.pagos || []), pago] } : p),
+    }));
+    flash(`Abono de ${money(pago.monto)} registrado.`);
+  }, [flash]);
+
+  const deletePayment = useCallback((projectId, payId) => {
+    setState((s) => ({
+      ...s,
+      crmProjects: s.crmProjects.map((p) => p.id === projectId ? { ...p, pagos: (p.pagos || []).filter((x) => x.id !== payId) } : p),
+    }));
+    flash('Abono eliminado.');
+  }, [flash]);
+
+  const addObservation = useCallback((projectId, texto) => {
+    const obs = { id: newId('obs'), texto, fecha: todayISO(), resuelto: false };
+    setState((s) => ({
+      ...s,
+      crmProjects: s.crmProjects.map((p) => p.id === projectId ? { ...p, observaciones: [...(p.observaciones || []), obs] } : p),
+    }));
+  }, []);
+
+  const toggleObservation = useCallback((projectId, obsId) => {
+    setState((s) => ({
+      ...s,
+      crmProjects: s.crmProjects.map((p) => p.id === projectId
+        ? { ...p, observaciones: (p.observaciones || []).map((o) => o.id === obsId ? { ...o, resuelto: !o.resuelto } : o) }
+        : p),
+    }));
+  }, []);
+
+  const deleteObservation = useCallback((projectId, obsId) => {
+    setState((s) => ({
+      ...s,
+      crmProjects: s.crmProjects.map((p) => p.id === projectId
+        ? { ...p, observaciones: (p.observaciones || []).filter((o) => o.id !== obsId) }
+        : p),
+    }));
+  }, []);
+
+  const saveBank = useCallback((bank) => {
+    setState((s) => ({ ...s, bankAccount: bank }));
+    flash('Cuenta bancaria guardada.');
+  }, [flash]);
+
   // ---- Export ---------------------------------------------
   const openExport = useCallback(() => setExportOpen(true), []);
 
@@ -235,6 +317,24 @@ function App() {
           <ReportesView
             transactions={transactions} products={products} clients={clients}
             period={period} setPeriod={setPeriod} anchor={anchor} setAnchor={setAnchor}
+          />
+        )}
+        {view === 'crm' && (
+          <CrmView
+            crmClients={crmClients} crmProjects={crmProjects} bankAccount={bankAccount}
+            onSaveClient={saveCrmClient}
+            onDeleteClient={deleteCrmClient}
+            onSaveProject={saveProject}
+            onDeleteProject={deleteProject}
+            onAddPayment={addPayment}
+            onDeletePayment={deletePayment}
+            onChangeState={changeProjectState}
+            onAddObservation={addObservation}
+            onToggleObservation={toggleObservation}
+            onDeleteObservation={deleteObservation}
+            onSaveBank={saveBank}
+            onToast={flash}
+            onConfirm={(cfg) => setConfirm({ ...cfg, onConfirm: () => { cfg.onConfirm(); setConfirm(null); } })}
           />
         )}
 

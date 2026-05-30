@@ -59,6 +59,7 @@ function Header({ view, setView, dataCount, onOpenAdd, onOpenExport }) {
     { id: 'inv',       label: 'Inventario' },
     { id: 'contactos', label: 'Contactos' },
     { id: 'reportes',  label: 'Reportes' },
+    { id: 'crm',       label: 'CRM' },
   ];
   return (
     <header className="header">

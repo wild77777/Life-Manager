@@ -44,6 +44,9 @@ function emptyState() {
     products: [],
     clients: [],
     suppliers: [],
+    crmClients: [],
+    crmProjects: [],
+    bankAccount: { banco: '', tipoCuenta: 'Corriente', numeroCuenta: '', titular: '' },
   };
 }
 
@@ -52,11 +55,17 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw);
+    const base = emptyState();
     return {
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
       products: Array.isArray(parsed.products) ? parsed.products : [],
       clients: Array.isArray(parsed.clients) ? parsed.clients : [],
       suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers : [],
+      crmClients: Array.isArray(parsed.crmClients) ? parsed.crmClients : [],
+      crmProjects: Array.isArray(parsed.crmProjects) ? parsed.crmProjects : [],
+      bankAccount: parsed.bankAccount && typeof parsed.bankAccount === 'object'
+        ? { ...base.bankAccount, ...parsed.bankAccount }
+        : base.bankAccount,
     };
   } catch (err) {
     console.warn('No se pudo leer almacenamiento:', err);
@@ -334,12 +343,100 @@ function exportMovements({ format, txs, products, clients, sheetName, filenameBa
   else downloadCSV(`${base}.csv`, rows);
 }
 
+// ============================================================
+// CRM — clients, projects, payments, WhatsApp
+// ============================================================
+
+const PROJECT_STATES = [
+  { id: 'pendiente',  label: 'Pendiente',  cls: 'pendiente' },
+  { id: 'proceso',    label: 'En proceso', cls: 'proceso' },
+  { id: 'finalizado', label: 'Finalizado', cls: 'finalizado' },
+  { id: 'entregado',  label: 'Entregado',  cls: 'entregado' },
+];
+function projectStateMeta(id) {
+  return PROJECT_STATES.find((s) => s.id === id) || PROJECT_STATES[0];
+}
+
+const PAYMENT_METHODS = [
+  { id: 'transferencia', label: 'Transferencia' },
+  { id: 'efectivo',      label: 'Efectivo' },
+  { id: 'deposito',      label: 'Depósito' },
+  { id: 'payphone',      label: 'PayPhone' },
+  { id: 'otros',         label: 'Otros' },
+];
+function paymentMethodLabel(id) {
+  const m = PAYMENT_METHODS.find((x) => x.id === id);
+  return m ? m.label : (id || '—');
+}
+
+const OBSERVATION_PRESETS = [
+  'Falta logo',
+  'Falta información del negocio',
+  'Falta imágenes',
+  'Cliente debe aprobar diseño',
+  'Solicitud de valores adicionales',
+];
+
+function projectPaid(project) {
+  if (!project || !Array.isArray(project.pagos)) return 0;
+  return project.pagos.reduce((s, p) => s + (+p.monto || 0), 0);
+}
+function projectPending(project) {
+  return Math.max(0, (+project.precioTotal || 0) - projectPaid(project));
+}
+
+// Days until a date (negative = overdue). Returns null if no date.
+function daysUntil(iso) {
+  if (!iso) return null;
+  const target = new Date(iso + 'T00:00:00');
+  const diff = target.getTime() - TODAY.getTime();
+  return Math.round(diff / 86400000);
+}
+
+// Build the WhatsApp message a client receives
+function buildWhatsappMessage(project, client, bank) {
+  const total = +project.precioTotal || 0;
+  const paid = projectPaid(project);
+  const pending = projectPending(project);
+  const estado = projectStateMeta(project.estado).label;
+  const nombre = [client.nombre, client.apellido].filter(Boolean).join(' ') || 'cliente';
+
+  const lines = [];
+  lines.push(`Hola ${client.nombre || nombre} 👋`);
+  lines.push('');
+  lines.push(`Tu proyecto *${project.nombre}* tiene el estado: *${estado}*.`);
+  lines.push('');
+  lines.push(`💵 Valor total: ${money(total)}`);
+  lines.push(`✅ Abonado: ${money(paid)}`);
+  lines.push(`🔻 Pendiente: ${money(pending)}`);
+
+  if (pending > 0 && bank && (bank.banco || bank.numeroCuenta)) {
+    lines.push('');
+    lines.push('Puedes realizar el pago a la siguiente cuenta:');
+    if (bank.banco)        lines.push(`🏦 Banco: ${bank.banco}`);
+    if (bank.tipoCuenta)   lines.push(`📂 Tipo: Cuenta ${bank.tipoCuenta}`);
+    if (bank.numeroCuenta) lines.push(`#️⃣ N° de cuenta: ${bank.numeroCuenta}`);
+    if (bank.titular)      lines.push(`👤 Titular: ${bank.titular}`);
+  }
+  lines.push('');
+  lines.push('¡Gracias por confiar en nuestro trabajo! 🙌');
+  return lines.join('\n');
+}
+
+// Normalise a phone to digits and build a wa.me link
+function whatsappLink(phone, message) {
+  const digits = String(phone || '').replace(/[^\d]/g, '');
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
 Object.assign(window, {
-  STORAGE_KEY, TODAY, CATEGORIES, categoryLabel,
   emptyState, loadState, saveState, newId,
   startOfPeriod, endOfPeriod, shiftPeriod,
   formatPeriodLabel, formatDate, formatDateFull, todayISO,
   money, moneyCompact, aggregate, chartBuckets, sparkSeries,
   MONTHS, MONTHS_SHORT, WEEKDAYS_SHORT,
   downloadCSV, exportTransactions, downloadXLS, exportMovements,
+  // CRM
+  PROJECT_STATES, projectStateMeta, PAYMENT_METHODS, paymentMethodLabel, OBSERVATION_PRESETS,
+  projectPaid, projectPending, daysUntil, buildWhatsappMessage, whatsappLink,
 });

@@ -58,6 +58,7 @@ function Header({ view, setView, dataCount, onOpenAdd, onOpenExport }) {
     { id: 'movs',      label: 'Movimientos' },
     { id: 'inv',       label: 'Inventario' },
     { id: 'contactos', label: 'Contactos' },
+    { id: 'deudas',    label: 'Deudas' },
     { id: 'reportes',  label: 'Reportes' },
     { id: 'crm',       label: 'CRM' },
   ];

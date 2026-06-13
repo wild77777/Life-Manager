@@ -961,3 +961,90 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; colo
   .finance-grid { grid-template-columns: 1fr; gap: 8px; }
   .proj-meta-row { gap: 16px; }
 }
+
+/* ========================================================== */
+/* Deudas                                                      */
+/* ========================================================== */
+.type-tabs-2 { grid-template-columns: 1fr 1fr; }
+.type-tab.tab-cobrar.is-active { background: var(--pos); border-color: var(--pos); }
+.type-tab.tab-pagar.is-active  { background: var(--neg); border-color: var(--neg); }
+.type-tab:disabled { opacity: 1; cursor: default; }
+.type-tabs-2 .type-tab:disabled:not(.is-active) { opacity: 0.4; }
+
+.amount-input.sm { padding: 2px 10px; }
+.amount-input.sm input { font-size: 16px; padding: 8px 6px !important; }
+
+/* Summary */
+.deuda-summary {
+  display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: var(--col-gap);
+  margin-bottom: var(--row-gap);
+}
+.dsum {
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg); padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow);
+}
+.dsum .kpi-value { font-size: 24px; margin: 0; }
+.dsum .kpi-value.pos { color: var(--pos); }
+.dsum .kpi-value.neg { color: var(--neg); }
+.dsum-cobrar { border-top: 2px solid var(--pos); }
+.dsum-pagar  { border-top: 2px solid var(--neg); }
+.dsum-note { font-size: 11px; color: var(--ink-3); letter-spacing: 0.04em; }
+
+/* Semáforo */
+.semaforo { display: inline-flex; align-items: center; gap: 8px; }
+.semaforo-dot {
+  width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0;
+  box-shadow: 0 0 0 3px var(--dot-halo, transparent);
+}
+.sem-verde    { background: #2B9E5E; --dot-halo: color-mix(in oklab, #2B9E5E 18%, transparent); }
+.sem-amarillo { background: #E0A526; --dot-halo: color-mix(in oklab, #E0A526 20%, transparent); }
+.sem-rojo     { background: #C8453A; --dot-halo: color-mix(in oklab, #C8453A 18%, transparent); }
+.sem-pagado   { background: var(--ink-4); }
+.semaforo-label { font-size: 13px; font-weight: 500; color: var(--ink); }
+
+/* Debt status pill */
+.debt-pill {
+  display: inline-flex; align-items: center;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+  padding: 3px 9px; border-radius: 999px; border: 1px solid; white-space: nowrap;
+}
+.debt-aldia     { color: var(--pos); border-color: color-mix(in oklab, var(--pos) 35%, var(--hairline)); background: color-mix(in oklab, var(--pos) 8%, transparent); }
+.debt-porvencer { color: #8A6D1F; border-color: color-mix(in oklab, #E0A526 45%, var(--hairline)); background: color-mix(in oklab, #E0A526 12%, transparent); }
+.debt-vencido   { color: var(--neg); border-color: var(--neg); background: color-mix(in oklab, var(--neg) 8%, transparent); }
+.debt-pagado    { color: var(--ink-3); border-color: var(--hairline); background: var(--surface-2); }
+
+/* Table */
+.deudas-table .sem-col { width: 28px; text-align: center; padding-left: 12px; padding-right: 0; }
+.deuda-row { cursor: pointer; }
+.deuda-party { display: flex; flex-direction: column; gap: 1px; }
+.deuda-party > span:first-child { font-weight: 600; }
+.vence-cell { display: inline-flex; align-items: center; gap: 6px; }
+
+.dir-total { font-size: 12px; color: var(--ink-3); }
+.dir-total strong { color: var(--ink); font-family: "JetBrains Mono", monospace; font-weight: 600; }
+
+/* Detail drawer */
+.detail-status { display: flex; align-items: center; gap: 12px; }
+.detail-concepto { font-size: 14px; color: var(--ink); font-weight: 500; }
+.detail-meta { display: flex; gap: 28px; flex-wrap: wrap; }
+.finance-bar-fill.is-pagar { background: var(--neg); }
+.drawer-foot-split { justify-content: space-between; }
+.btn-ghost.danger-ghost { color: var(--neg); border-color: color-mix(in oklab, var(--neg) 30%, var(--hairline)); }
+.btn-ghost.danger-ghost:hover { border-color: var(--neg); }
+
+.abono-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }
+.abono-date {
+  border: 1px solid var(--hairline); background: var(--surface-2);
+  border-radius: var(--radius); padding: 0 12px; font-size: 13px; color: var(--ink); outline: none;
+}
+.abono-date:focus { border-color: var(--ink); background: var(--surface); }
+.abono-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+@media (max-width: 1100px) {
+  .deuda-summary { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 720px) {
+  .deuda-summary { grid-template-columns: 1fr 1fr; }
+  .detail-meta { gap: 16px; }
+}

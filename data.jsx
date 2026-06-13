@@ -46,6 +46,7 @@ function emptyState() {
     suppliers: [],
     crmClients: [],
     crmProjects: [],
+    debts: [],
     bankAccount: { banco: '', tipoCuenta: 'Corriente', numeroCuenta: '', titular: '' },
   };
 }
@@ -63,6 +64,7 @@ function loadState() {
       suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers : [],
       crmClients: Array.isArray(parsed.crmClients) ? parsed.crmClients : [],
       crmProjects: Array.isArray(parsed.crmProjects) ? parsed.crmProjects : [],
+      debts: Array.isArray(parsed.debts) ? parsed.debts : [],
       bankAccount: parsed.bankAccount && typeof parsed.bankAccount === 'object'
         ? { ...base.bankAccount, ...parsed.bankAccount }
         : base.bankAccount,
@@ -429,6 +431,66 @@ function whatsappLink(phone, message) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
+// ============================================================
+// Deudas — cuentas por cobrar (me deben) y por pagar (yo debo)
+// ============================================================
+
+// 'cobrar' = un cliente me debe (fiado) · 'pagar' = yo le debo a alguien
+const DEBT_DIRECTIONS = [
+  { id: 'cobrar', label: 'Por cobrar', persona: 'Cliente', who: 'Me debe' },
+  { id: 'pagar',  label: 'Por pagar',  persona: 'Acreedor', who: 'Le debo' },
+];
+
+function debtPaid(d) {
+  if (!d || !Array.isArray(d.pagos)) return 0;
+  return d.pagos.reduce((s, p) => s + (+p.monto || 0), 0);
+}
+function debtBalance(d) {
+  return Math.max(0, (+d.total || 0) - debtPaid(d));
+}
+
+// Semáforo de cobro: 'pagado' | 'aldia' | 'porvencer' | 'vencido'
+function debtStatus(d) {
+  if (debtBalance(d) <= 0.009) return 'pagado';
+  const dleft = daysUntil(d.fechaVencimiento);
+  if (dleft == null) return 'aldia';
+  if (dleft < 0) return 'vencido';
+  if (dleft <= 3) return 'porvencer';
+  return 'aldia';
+}
+const DEBT_STATUS_META = {
+  pagado:    { label: 'Pagado',           cls: 'pagado',    dot: 'pagado' },
+  aldia:     { label: 'Al día',           cls: 'aldia',     dot: 'verde' },
+  porvencer: { label: 'Próximo a vencer', cls: 'porvencer', dot: 'amarillo' },
+  vencido:   { label: 'Vencido',          cls: 'vencido',   dot: 'rojo' },
+};
+function debtStatusMeta(d) { return DEBT_STATUS_META[debtStatus(d)] || DEBT_STATUS_META.aldia; }
+
+// Mensaje de recordatorio de cobro (WhatsApp)
+function buildDebtReminder(d, bank) {
+  const saldo = debtBalance(d);
+  const lines = [];
+  lines.push(`Hola ${d.contraparte || ''} 👋`.trim());
+  lines.push('');
+  lines.push(`Te recuerdo amablemente el saldo pendiente${d.concepto ? ` de *${d.concepto}*` : ''}:`);
+  lines.push('');
+  lines.push(`💵 Valor total: ${money(d.total)}`);
+  lines.push(`✅ Abonado: ${money(debtPaid(d))}`);
+  lines.push(`🔻 Saldo pendiente: ${money(saldo)}`);
+  if (d.fechaVencimiento) lines.push(`📅 Vence: ${formatDateFull(d.fechaVencimiento)}`);
+  if (bank && (bank.banco || bank.numeroCuenta)) {
+    lines.push('');
+    lines.push('Puedes abonar a la siguiente cuenta:');
+    if (bank.banco)        lines.push(`🏦 Banco: ${bank.banco}`);
+    if (bank.tipoCuenta)   lines.push(`📂 Tipo: Cuenta ${bank.tipoCuenta}`);
+    if (bank.numeroCuenta) lines.push(`#️⃣ N° de cuenta: ${bank.numeroCuenta}`);
+    if (bank.titular)      lines.push(`👤 Titular: ${bank.titular}`);
+  }
+  lines.push('');
+  lines.push('¡Gracias! 🙌');
+  return lines.join('\n');
+}
+
 Object.assign(window, {
   emptyState, loadState, saveState, newId,
   startOfPeriod, endOfPeriod, shiftPeriod,
@@ -439,4 +501,6 @@ Object.assign(window, {
   // CRM
   PROJECT_STATES, projectStateMeta, PAYMENT_METHODS, paymentMethodLabel, OBSERVATION_PRESETS,
   projectPaid, projectPending, daysUntil, buildWhatsappMessage, whatsappLink,
+  // Deudas
+  DEBT_DIRECTIONS, debtPaid, debtBalance, debtStatus, DEBT_STATUS_META, debtStatusMeta, buildDebtReminder,
 });

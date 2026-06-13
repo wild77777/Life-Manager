@@ -13,7 +13,7 @@ function App() {
 
   // Persisted state ------------------------------------------
   const [state, setState] = useState(() => loadState());
-  const { transactions, products, clients, suppliers, crmClients, crmProjects, bankAccount } = state;
+  const { transactions, products, clients, suppliers, crmClients, crmProjects, debts, bankAccount } = state;
 
   useEffect(() => { saveState(state); }, [state]);
 
@@ -212,6 +212,36 @@ function App() {
     flash('Cuenta bancaria guardada.');
   }, [flash]);
 
+  // ---- Deudas mutations -----------------------------------
+  const saveDebt = useCallback((d, isEdit) => {
+    setState((s) => ({
+      ...s,
+      debts: isEdit ? s.debts.map((x) => (x.id === d.id ? d : x)) : [d, ...s.debts],
+    }));
+    flash(isEdit ? 'Deuda actualizada.' : 'Deuda registrada.');
+  }, [flash]);
+
+  const deleteDebt = useCallback((id) => {
+    setState((s) => ({ ...s, debts: s.debts.filter((x) => x.id !== id) }));
+    flash('Deuda eliminada.');
+  }, [flash]);
+
+  const addDebtPayment = useCallback((debtId, pago) => {
+    setState((s) => ({
+      ...s,
+      debts: s.debts.map((d) => d.id === debtId ? { ...d, pagos: [...(d.pagos || []), pago] } : d),
+    }));
+    flash(`Abono de ${money(pago.monto)} registrado.`);
+  }, [flash]);
+
+  const deleteDebtPayment = useCallback((debtId, payId) => {
+    setState((s) => ({
+      ...s,
+      debts: s.debts.map((d) => d.id === debtId ? { ...d, pagos: (d.pagos || []).filter((x) => x.id !== payId) } : d),
+    }));
+    flash('Abono eliminado.');
+  }, [flash]);
+
   // ---- Export ---------------------------------------------
   const openExport = useCallback(() => setExportOpen(true), []);
 
@@ -317,6 +347,16 @@ function App() {
           <ReportesView
             transactions={transactions} products={products} clients={clients}
             period={period} setPeriod={setPeriod} anchor={anchor} setAnchor={setAnchor}
+          />
+        )}
+        {view === 'deudas' && (
+          <DeudasView
+            debts={debts} bankAccount={bankAccount}
+            onSave={saveDebt}
+            onDelete={deleteDebt}
+            onAddPayment={addDebtPayment}
+            onDeletePayment={deleteDebtPayment}
+            onConfirm={(cfg) => setConfirm({ ...cfg, onConfirm: () => { cfg.onConfirm(); setConfirm(null); } })}
           />
         )}
         {view === 'crm' && (

@@ -395,33 +395,71 @@ function daysUntil(iso) {
   return Math.round(diff / 86400000);
 }
 
-// Build the WhatsApp message a client receives
+// Build the WhatsApp message a client receives — full detail
 function buildWhatsappMessage(project, client, bank) {
   const total = +project.precioTotal || 0;
   const paid = projectPaid(project);
   const pending = projectPending(project);
   const estado = projectStateMeta(project.estado).label;
   const nombre = [client.nombre, client.apellido].filter(Boolean).join(' ') || 'cliente';
+  const pagos = [...(project.pagos || [])].sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+
+  // Estado de pago: pagado / abonado parcial / sin abono
+  let pagoEstado, pagoIcon;
+  if (total <= 0 || pending <= 0.009) { pagoEstado = 'PAGADO ✔️'; pagoIcon = '🟢'; }
+  else if (paid > 0) { pagoEstado = 'ABONADO PARCIAL'; pagoIcon = '🟡'; }
+  else { pagoEstado = 'PENDIENTE DE PAGO'; pagoIcon = '🔴'; }
+  const pct = total > 0 ? Math.round((paid / total) * 100) : 0;
 
   const lines = [];
   lines.push(`Hola ${client.nombre || nombre} 👋`);
+  lines.push('Te compartimos el detalle de tu cuenta:');
   lines.push('');
-  lines.push(`Tu proyecto *${project.nombre}* tiene el estado: *${estado}*.`);
+  lines.push('━━━━━━━━━━━━━━━');
+  lines.push(`📋 *${project.nombre}*`);
+  if (project.descripcion) lines.push(`_${project.descripcion}_`);
+  lines.push(`📌 Estado del trabajo: *${estado}*`);
+  lines.push('━━━━━━━━━━━━━━━');
+  lines.push('');
+
+  // Fechas
+  if (project.fechaInicio) lines.push(`🗓️ Inicio: ${formatDateFull(project.fechaInicio)}`);
+  if (!project.plazoIndefinido && project.fechaLimite) lines.push(`⏳ Entrega: ${formatDateFull(project.fechaLimite)}`);
+  if (project.fechaInicio || (!project.plazoIndefinido && project.fechaLimite)) lines.push('');
+
+  // Resumen de pago
+  lines.push(`${pagoIcon} *Estado de pago: ${pagoEstado}*`);
   lines.push('');
   lines.push(`💵 Valor total: ${money(total)}`);
-  lines.push(`✅ Abonado: ${money(paid)}`);
-  lines.push(`🔻 Pendiente: ${money(pending)}`);
+  lines.push(`✅ Abonado: ${money(paid)}  (${pct}%)`);
+  lines.push(`🔻 Saldo pendiente: ${money(pending)}`);
 
-  if (pending > 0 && bank && (bank.banco || bank.numeroCuenta)) {
+  // Historial de abonos
+  if (pagos.length > 0) {
     lines.push('');
-    lines.push('Puedes realizar el pago a la siguiente cuenta:');
+    lines.push('🧾 *Detalle de abonos:*');
+    pagos.forEach((p, i) => {
+      const met = paymentMethodLabel(p.metodo);
+      lines.push(`  ${i + 1}. ${formatDateFull(p.fecha)} — ${money(p.monto)} (${met})`);
+    });
+  }
+
+  // Datos de pago si hay saldo
+  if (pending > 0.009 && bank && (bank.banco || bank.numeroCuenta)) {
+    lines.push('');
+    lines.push('💳 *Para abonar el saldo:*');
     if (bank.banco)        lines.push(`🏦 Banco: ${bank.banco}`);
     if (bank.tipoCuenta)   lines.push(`📂 Tipo: Cuenta ${bank.tipoCuenta}`);
     if (bank.numeroCuenta) lines.push(`#️⃣ N° de cuenta: ${bank.numeroCuenta}`);
     if (bank.titular)      lines.push(`👤 Titular: ${bank.titular}`);
   }
+
   lines.push('');
-  lines.push('¡Gracias por confiar en nuestro trabajo! 🙌');
+  if (pending <= 0.009 && total > 0) {
+    lines.push('¡Tu cuenta está al día! Gracias por tu confianza 🙌');
+  } else {
+    lines.push('¡Gracias por confiar en nuestro trabajo! 🙌');
+  }
   return lines.join('\n');
 }
 

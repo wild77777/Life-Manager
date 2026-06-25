@@ -415,6 +415,96 @@ function WhatsappDrawer({ open, onClose, project, client, bank, onToast }) {
 }
 
 // ============================================================
+// Drawer: reporte consolidado del cliente (todos los proyectos)
+// ============================================================
+function ClientReportDrawer({ open, onClose, client, projects, bank, onToast }) {
+  const [msg, setMsg] = useCrmState('');
+  useCrmEffect(() => {
+    if (open && client) setMsg(buildClientReport(client, projects || [], bank));
+  }, [open, client, projects, bank]);
+
+  if (!client) {
+    return (
+      <>
+        <div className={classNames('drawer-scrim', open && 'is-open')} onClick={onClose} />
+        <aside className={classNames('drawer', open && 'is-open')} aria-hidden={!open} />
+      </>
+    );
+  }
+
+  const t = clientReportTotals(projects || []);
+  const hasWa = !!String(client.whatsapp || '').replace(/[^\d]/g, '');
+
+  function send() {
+    if (!hasWa) { onToast && onToast('Este cliente no tiene WhatsApp registrado.'); return; }
+    window.open(whatsappLink(client.whatsapp, msg), '_blank');
+    onToast && onToast('Abriendo WhatsApp…');
+    onClose();
+  }
+  async function copy() {
+    try { await navigator.clipboard.writeText(msg); onToast && onToast('Reporte copiado.'); }
+    catch (e) { onToast && onToast('No se pudo copiar.'); }
+  }
+  function pdf() {
+    const html = buildClientReportHTML(client, projects || [], bank);
+    const w = window.open('', '_blank');
+    if (!w) { onToast && onToast('Permite las ventanas emergentes para generar el PDF.'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    w.focus();
+    setTimeout(() => { try { w.print(); } catch (e) {} }, 350);
+    onToast && onToast('Abriendo vista de impresión → guarda como PDF.');
+  }
+
+  return (
+    <>
+      <div className={classNames('drawer-scrim', open && 'is-open')} onClick={onClose} />
+      <aside className={classNames('drawer drawer-wide', open && 'is-open')} aria-hidden={!open}>
+        <header className="drawer-head">
+          <div>
+            <div className="drawer-eyebrow">Reporte completo</div>
+            <div className="drawer-title">{[client.nombre, client.apellido].filter(Boolean).join(' ') || 'Cliente'}</div>
+          </div>
+          <button className="icon-btn close" onClick={onClose} aria-label="Cerrar">×</button>
+        </header>
+        <div className="drawer-body">
+          {(projects || []).length === 0 ? (
+            <div className="callout callout-warn">Este cliente aún no tiene proyectos para reportar.</div>
+          ) : (
+            <>
+              <div className="report-summary">
+                <div className="rs-cell"><span>Proyectos</span><strong>{t.count}</strong></div>
+                <div className="rs-cell"><span>Total</span><strong>{money(t.total)}</strong></div>
+                <div className="rs-cell"><span>Abonado</span><strong className="pos">{money(t.abonado)}</strong></div>
+                <div className="rs-cell"><span>Saldo</span><strong className="neg">{money(t.pendiente)}</strong></div>
+              </div>
+
+              <button className="btn-primary btn-block report-pdf-btn" onClick={pdf}>
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5l3 3V14a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 14V2a.5.5 0 0 1 .5-.5z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/><path d="M9 1.5V4.5H12M6 8.5h4M6 11h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/></svg>
+                Descargar / Imprimir PDF
+              </button>
+
+              {!hasWa && <div className="callout callout-warn">Registra el WhatsApp del cliente (con código de país) para poder enviarlo por chat.</div>}
+
+              <div className="field">
+                <label>Mensaje para WhatsApp (editable)</label>
+                <textarea className="wa-textarea" rows="16" value={msg} onChange={(e) => setMsg(e.target.value)} />
+              </div>
+            </>
+          )}
+        </div>
+        <footer className="drawer-foot">
+          <button className="btn-ghost" onClick={copy} disabled={(projects || []).length === 0}>Copiar texto</button>
+          <button className="btn-primary btn-wa" onClick={send} disabled={!hasWa || (projects || []).length === 0}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zm5.8 14.01c-.24.68-1.42 1.31-1.96 1.36-.5.05-.96.23-3.23-.67-2.73-1.08-4.45-3.86-4.58-4.04-.13-.18-1.1-1.46-1.1-2.79s.7-1.98.94-2.25c.24-.27.53-.34.71-.34.18 0 .35 0 .51.01.16.01.39-.06.6.46.24.56.78 1.91.85 2.05.07.14.12.3.02.48-.09.18-.14.29-.28.45-.14.16-.29.36-.42.48-.14.14-.28.28-.12.55.16.27.71 1.17 1.53 1.9 1.05.93 1.94 1.22 2.21 1.36.27.14.43.12.59-.07.16-.18.68-.79.86-1.06.18-.27.36-.23.6-.14.24.09 1.55.73 1.81.86.27.13.45.2.51.31.07.11.07.63-.17 1.31z"/></svg>
+            Enviar por WhatsApp
+          </button>
+        </footer>
+      </aside>
+    </>
+  );
+}
+
+// ============================================================
 // Project card (detail)
 // ============================================================
 function ProjectCard({ project, client, bank, onEdit, onDelete, onAddPayment, onDeletePayment, onChangeState, onAddObservation, onToggleObservation, onDeleteObservation, onSendWhatsapp }) {
@@ -576,6 +666,7 @@ function CrmView(props) {
   const [payDrawer, setPayDrawer] = useCrmState({ open: false, project: null });
   const [bankDrawer, setBankDrawer] = useCrmState(false);
   const [waDrawer, setWaDrawer] = useCrmState({ open: false, project: null });
+  const [reportDrawer, setReportDrawer] = useCrmState(false);
 
   // Keep a valid selection
   useCrmEffect(() => {
@@ -744,6 +835,10 @@ function CrmView(props) {
                     </div>
                   </div>
                   <div className="cch-actions">
+                    <button className="btn-primary btn-sm cch-report" onClick={() => setReportDrawer(true)} title="Reporte completo del cliente">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5l3 3V14a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 14V2a.5.5 0 0 1 .5-.5z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/><path d="M9 1.5V4.5H12M6 8.5h4M6 11h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/></svg>
+                      Reporte completo
+                    </button>
                     <button className="row-btn" onClick={() => setCliDrawer({ open: true, editing: selected })} title="Editar cliente"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2L4.5 11.5 2 12l.5-2.5L9.5 2.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg></button>
                     <button className="row-btn danger" onClick={() => askDeleteClient(selected)} title="Eliminar cliente"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 4h9M5 4V2.5h4V4M4 4l.5 7.5h5L10 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg></button>
                   </div>
@@ -805,6 +900,11 @@ function CrmView(props) {
       <WhatsappDrawer
         open={waDrawer.open} project={waDrawer.project} client={selected} bank={bankAccount}
         onClose={() => setWaDrawer({ open: false, project: null })}
+        onToast={onToast}
+      />
+      <ClientReportDrawer
+        open={reportDrawer} client={selected} projects={selectedProjects} bank={bankAccount}
+        onClose={() => setReportDrawer(false)}
         onToast={onToast}
       />
     </>

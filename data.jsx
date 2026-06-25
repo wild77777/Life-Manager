@@ -470,6 +470,176 @@ function whatsappLink(phone, message) {
 }
 
 // ============================================================
+// Reporte consolidado por cliente (todos los proyectos)
+// ============================================================
+function reportClientName(c) {
+  return [c.nombre, c.apellido].filter(Boolean).join(' ') || 'Sin nombre';
+}
+function clientReportTotals(projects) {
+  let total = 0, abonado = 0, pendiente = 0;
+  for (const p of projects) { total += +p.precioTotal || 0; abonado += projectPaid(p); pendiente += projectPending(p); }
+  return { total, abonado, pendiente, count: projects.length };
+}
+function projectPagoEstado(p) {
+  const total = +p.precioTotal || 0, pend = projectPending(p), paid = projectPaid(p);
+  if (total <= 0 || pend <= 0.009) return { label: 'Pagado', icon: '🟢', cls: 'pagado' };
+  if (paid > 0) return { label: 'Abonado parcial', icon: '🟡', cls: 'parcial' };
+  return { label: 'Pendiente', icon: '🔴', cls: 'pendiente' };
+}
+
+// Texto para WhatsApp: resumen de TODOS los proyectos del cliente
+function buildClientReport(client, projects, bank) {
+  const nombre = client.nombre || reportClientName(client) || 'cliente';
+  const t = clientReportTotals(projects);
+  const lines = [];
+  lines.push(`Hola ${nombre} 👋`);
+  lines.push('Este es el *reporte completo* de tus proyectos:');
+  lines.push('');
+  lines.push('═══════════════════');
+  lines.push(`📊 *RESUMEN GENERAL*`);
+  lines.push(`📁 Proyectos: ${t.count}`);
+  lines.push(`💵 Valor total: ${money(t.total)}`);
+  lines.push(`✅ Abonado: ${money(t.abonado)}`);
+  lines.push(`🔻 Saldo total pendiente: ${money(t.pendiente)}`);
+  lines.push('═══════════════════');
+
+  projects.forEach((p, i) => {
+    const est = projectPagoEstado(p);
+    const trabajo = projectStateMeta(p.estado).label;
+    const total = +p.precioTotal || 0;
+    lines.push('');
+    lines.push(`*${i + 1}. ${p.nombre}*`);
+    lines.push(`   📌 Trabajo: ${trabajo}`);
+    lines.push(`   ${est.icon} Pago: ${est.label}`);
+    if (p.fechaInicio) lines.push(`   🗓️ Inicio: ${formatDateFull(p.fechaInicio)}`);
+    if (!p.plazoIndefinido && p.fechaLimite) lines.push(`   ⏳ Entrega: ${formatDateFull(p.fechaLimite)}`);
+    lines.push(`   💵 Total: ${money(total)}  ·  ✅ ${money(projectPaid(p))}  ·  🔻 ${money(projectPending(p))}`);
+  });
+
+  if (t.pendiente > 0.009 && bank && (bank.banco || bank.numeroCuenta)) {
+    lines.push('');
+    lines.push('═══════════════════');
+    lines.push('💳 *Para abonar tu saldo:*');
+    if (bank.banco)        lines.push(`🏦 Banco: ${bank.banco}`);
+    if (bank.tipoCuenta)   lines.push(`📂 Tipo: Cuenta ${bank.tipoCuenta}`);
+    if (bank.numeroCuenta) lines.push(`#️⃣ N° de cuenta: ${bank.numeroCuenta}`);
+    if (bank.titular)      lines.push(`👤 Titular: ${bank.titular}`);
+  }
+  lines.push('');
+  lines.push(t.pendiente <= 0.009 && t.total > 0 ? '¡Tu cuenta está al día! Gracias por tu confianza 🙌' : '¡Gracias por confiar en nuestro trabajo! 🙌');
+  return lines.join('\n');
+}
+
+// HTML imprimible (para guardar como PDF) — reporte por cliente
+function buildClientReportHTML(client, projects, bank) {
+  const t = clientReportTotals(projects);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const hoy = formatDateFull(todayISO());
+  const rows = projects.map((p, i) => {
+    const est = projectPagoEstado(p);
+    const trabajo = projectStateMeta(p.estado).label;
+    const entrega = p.plazoIndefinido ? 'Indefinido' : (p.fechaLimite ? formatDateFull(p.fechaLimite) : '—');
+    return `<tr>
+      <td class="c-num">${i + 1}</td>
+      <td><div class="p-name">${esc(p.nombre)}</div>${p.descripcion ? `<div class="p-desc">${esc(p.descripcion)}</div>` : ''}</td>
+      <td>${esc(trabajo)}</td>
+      <td><span class="pill pill-${est.cls}">${esc(est.label)}</span></td>
+      <td class="c-date">${esc(entrega)}</td>
+      <td class="c-num money">${money(+p.precioTotal || 0)}</td>
+      <td class="c-num money pos">${money(projectPaid(p))}</td>
+      <td class="c-num money neg">${money(projectPending(p))}</td>
+    </tr>`;
+  }).join('');
+
+  const bankBlock = (t.pendiente > 0.009 && bank && (bank.banco || bank.numeroCuenta)) ? `
+    <div class="bank">
+      <div class="bank-title">Datos para el pago del saldo</div>
+      <div class="bank-grid">
+        ${bank.banco ? `<div><span>Banco</span><strong>${esc(bank.banco)}</strong></div>` : ''}
+        ${bank.tipoCuenta ? `<div><span>Tipo</span><strong>Cuenta ${esc(bank.tipoCuenta)}</strong></div>` : ''}
+        ${bank.numeroCuenta ? `<div><span>N° de cuenta</span><strong>${esc(bank.numeroCuenta)}</strong></div>` : ''}
+        ${bank.titular ? `<div><span>Titular</span><strong>${esc(bank.titular)}</strong></div>` : ''}
+      </div>
+    </div>` : '';
+
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<title>Reporte ${esc(reportClientName(client))}</title>
+<style>
+  @page { size: A4; margin: 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #14140F; margin: 0; font-size: 13px; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1C6B43; padding-bottom: 16px; margin-bottom: 22px; }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .brand .sq { width: 12px; height: 12px; background: #1C6B43; border-radius: 2px; }
+  .brand b { font-size: 18px; letter-spacing: -.02em; }
+  .head .meta { text-align: right; font-size: 11px; color: #6B6862; line-height: 1.5; }
+  h1 { font-size: 22px; margin: 0 0 2px; }
+  .sub { color: #6B6862; font-size: 12px; }
+  .contact { font-size: 11px; color: #6B6862; margin-top: 4px; }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 0 0 22px; }
+  .sc { border: 1px solid #E2DED4; border-radius: 8px; padding: 12px 14px; }
+  .sc span { display: block; font-size: 9px; letter-spacing: .09em; text-transform: uppercase; color: #8E8B84; margin-bottom: 5px; }
+  .sc strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+  .sc.pos strong { color: #1C6B43; } .sc.neg strong { color: #A8392A; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: #8E8B84; border-bottom: 1.5px solid #14140F; padding: 0 8px 7px; }
+  tbody td { padding: 11px 8px; border-bottom: 1px solid #ECE8DE; vertical-align: top; }
+  th.c-num, td.c-num { text-align: right; }
+  .money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .money.pos { color: #1C6B43; } .money.neg { color: #A8392A; }
+  .p-name { font-weight: 600; } .p-desc { color: #8E8B84; font-size: 11px; margin-top: 2px; }
+  .c-date { color: #555; white-space: nowrap; }
+  .pill { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+  .pill-pagado { color: #1C6B43; border-color: #1C6B43; background: #EAF4EE; }
+  .pill-parcial { color: #8A6D1F; border-color: #D8AA3A; background: #FBF3DE; }
+  .pill-pendiente { color: #A8392A; border-color: #A8392A; background: #F8ECE9; }
+  tfoot td { padding: 12px 8px; font-weight: 700; border-top: 2px solid #14140F; font-variant-numeric: tabular-nums; }
+  .bank { margin-top: 24px; border: 1px solid #E2DED4; border-left: 4px solid #1C6B43; border-radius: 8px; padding: 14px 16px; background: #FAFAF7; }
+  .bank-title { font-weight: 700; margin-bottom: 10px; font-size: 12px; }
+  .bank-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 24px; }
+  .bank-grid span { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .07em; color: #8E8B84; }
+  .bank-grid strong { font-size: 13px; }
+  .foot { margin-top: 28px; text-align: center; color: #8E8B84; font-size: 11px; }
+</style></head>
+<body>
+  <div class="head">
+    <div>
+      <div class="brand"><span class="sq"></span><b>Life Manager</b></div>
+      <h1 style="margin-top:14px">${esc(reportClientName(client))}</h1>
+      <div class="sub">Reporte de proyectos y estado de pagos</div>
+      <div class="contact">${[client.whatsapp ? '📱 ' + esc(client.whatsapp) : '', client.email ? '✉ ' + esc(client.email) : '', client.cedula ? '🪪 ' + esc(client.cedula) : ''].filter(Boolean).join('  ·  ')}</div>
+    </div>
+    <div class="meta">Emitido<br><strong>${esc(hoy)}</strong></div>
+  </div>
+
+  <div class="summary">
+    <div class="sc"><span>Proyectos</span><strong>${t.count}</strong></div>
+    <div class="sc"><span>Valor total</span><strong>${money(t.total)}</strong></div>
+    <div class="sc pos"><span>Abonado</span><strong>${money(t.abonado)}</strong></div>
+    <div class="sc neg"><span>Saldo pendiente</span><strong>${money(t.pendiente)}</strong></div>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th class="c-num">#</th><th>Proyecto</th><th>Trabajo</th><th>Pago</th><th>Entrega</th>
+      <th class="c-num">Total</th><th class="c-num">Abonado</th><th class="c-num">Saldo</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr>
+      <td colspan="5">Totales</td>
+      <td class="c-num">${money(t.total)}</td>
+      <td class="c-num" style="color:#1C6B43">${money(t.abonado)}</td>
+      <td class="c-num" style="color:#A8392A">${money(t.pendiente)}</td>
+    </tr></tfoot>
+  </table>
+
+  ${bankBlock}
+
+  <div class="foot">Gracias por confiar en nuestro trabajo · Generado con Life Manager</div>
+</body></html>`;
+}
+
+// ============================================================
 // Deudas — cuentas por cobrar (me deben) y por pagar (yo debo)
 // ============================================================
 
@@ -541,4 +711,6 @@ Object.assign(window, {
   projectPaid, projectPending, daysUntil, buildWhatsappMessage, whatsappLink,
   // Deudas
   DEBT_DIRECTIONS, debtPaid, debtBalance, debtStatus, DEBT_STATUS_META, debtStatusMeta, buildDebtReminder,
+  // Reporte por cliente
+  buildClientReport, buildClientReportHTML, clientReportTotals, projectPagoEstado,
 });

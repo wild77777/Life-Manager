@@ -1052,6 +1052,23 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; colo
 .abono-date:focus { border-color: var(--ink); background: var(--surface); }
 .abono-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
+/* Reporte por cliente */
+.cch-actions { display: flex; align-items: center; gap: 8px; }
+.cch-report { white-space: nowrap; }
+.drawer-wide { width: min(560px, 96vw); max-width: 96vw; }
+.report-summary {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px;
+}
+.rs-cell {
+  border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px; background: var(--surface-2);
+}
+.rs-cell span { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.rs-cell strong { font-size: 16px; font-family: "JetBrains Mono", monospace; }
+.rs-cell strong.pos { color: var(--pos); }
+.rs-cell strong.neg { color: var(--neg); }
+.report-pdf-btn { margin-bottom: 16px; }
+
 @media (max-width: 1100px) {
   .deuda-summary { grid-template-columns: repeat(2, 1fr); }
 }

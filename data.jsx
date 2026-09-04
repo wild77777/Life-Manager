@@ -47,6 +47,8 @@ function emptyState() {
     crmClients: [],
     crmProjects: [],
     debts: [],
+    pedidos: [],
+    repartidores: [],
     bankAccount: { banco: '', tipoCuenta: 'Corriente', numeroCuenta: '', titular: '' },
   };
 }
@@ -65,6 +67,8 @@ function loadState() {
       crmClients: Array.isArray(parsed.crmClients) ? parsed.crmClients : [],
       crmProjects: Array.isArray(parsed.crmProjects) ? parsed.crmProjects : [],
       debts: Array.isArray(parsed.debts) ? parsed.debts : [],
+      pedidos: Array.isArray(parsed.pedidos) ? parsed.pedidos : [],
+      repartidores: Array.isArray(parsed.repartidores) ? parsed.repartidores : [],
       bankAccount: parsed.bankAccount && typeof parsed.bankAccount === 'object'
         ? { ...base.bankAccount, ...parsed.bankAccount }
         : base.bankAccount,
@@ -699,6 +703,253 @@ function buildDebtReminder(d, bank) {
   return lines.join('\n');
 }
 
+// ============================================================
+// Pedidos — delivery Guayaquil + ventas en local
+// ============================================================
+
+// Zonas de Guayaquil con flete sugerido (editable en cada pedido)
+const ZONAS_GYE = [
+  { id: 'centro',      label: 'Centro',                 flete: 2.50 },
+  { id: 'urdesa',      label: 'Urdesa · Ceibos',        flete: 3.00 },
+  { id: 'alborada',    label: 'Alborada · Garzota',     flete: 3.00 },
+  { id: 'sauces',      label: 'Sauces · Guayacanes',    flete: 3.00 },
+  { id: 'samanes',     label: 'Samanes · Kennedy',      flete: 3.00 },
+  { id: 'via_daule',   label: 'Vía a Daule · Mucho Lote', flete: 4.00 },
+  { id: 'via_costa',   label: 'Vía a la Costa',         flete: 4.50 },
+  { id: 'sur',         label: 'Sur · Centenario',       flete: 3.50 },
+  { id: 'guasmo',      label: 'Guasmo · Floresta',      flete: 4.00 },
+  { id: 'suburbio',    label: 'Suburbio · Trinitaria',  flete: 4.00 },
+  { id: 'samborondon', label: 'Samborondón · La Puntilla', flete: 5.00 },
+  { id: 'aurora',      label: 'La Aurora · Daule',      flete: 5.00 },
+  { id: 'duran',       label: 'Durán',                  flete: 5.00 },
+  { id: 'otro',        label: 'Otra zona',              flete: 0 },
+];
+function zonaMeta(id) { return ZONAS_GYE.find((z) => z.id === id) || ZONAS_GYE[ZONAS_GYE.length - 1]; }
+function zonaLabel(id) { return id ? zonaMeta(id).label : '—'; }
+
+// Estados operativos del pedido
+const PEDIDO_ESTADOS = [
+  { id: 'nuevo',      label: 'Por confirmar', short: 'Por confirmar', cls: 'nuevo',      dot: 'gris' },
+  { id: 'confirmado', label: 'Confirmado',    short: 'Confirmado',    cls: 'confirmado', dot: 'azul' },
+  { id: 'ruta',       label: 'En ruta',       short: 'En ruta',       cls: 'ruta',       dot: 'amarillo' },
+  { id: 'entregado',  label: 'Entregado',     short: 'Entregado',     cls: 'entregado',  dot: 'verde' },
+  { id: 'reagendado', label: 'Reagendado',    short: 'Reagendado',    cls: 'reagendado', dot: 'amarillo' },
+  { id: 'devuelto',   label: 'Devuelto',      short: 'Devuelto',      cls: 'devuelto',   dot: 'rojo' },
+  { id: 'cancelado',  label: 'Cancelado',     short: 'Cancelado',     cls: 'cancelado',  dot: 'gris' },
+];
+function pedidoEstadoMeta(id) { return PEDIDO_ESTADOS.find((e) => e.id === id) || PEDIDO_ESTADOS[0]; }
+
+// Estados que ya cerraron el ciclo (no cuentan como pendientes)
+const ESTADOS_CERRADOS = ['entregado', 'devuelto', 'cancelado'];
+function pedidoAbierto(p) { return !ESTADOS_CERRADOS.includes(p.estado); }
+
+// ---- Totales ------------------------------------------------
+function pedidoSubtotal(p) {
+  return (p.items || []).reduce((s, it) => s + (+it.precio || 0) * (+it.cantidad || 0), 0);
+}
+function pedidoUnidades(p) {
+  return (p.items || []).reduce((s, it) => s + (+it.cantidad || 0), 0);
+}
+function pedidoTotal(p) {
+  return Math.max(0, pedidoSubtotal(p) - (+p.descuento || 0) + (+p.flete || 0));
+}
+// Lo que el negocio se queda: total menos el flete que se lleva el repartidor
+function pedidoNeto(p) {
+  return pedidoTotal(p) - (p.fleteParaRepartidor ? (+p.flete || 0) : 0);
+}
+function pedidoItemsResumen(p) {
+  const items = p.items || [];
+  if (!items.length) return '—';
+  const first = `${items[0].cantidad}× ${items[0].nombre}`;
+  return items.length === 1 ? first : `${first} +${items.length - 1}`;
+}
+function nextPedidoNumero(pedidos) {
+  let max = 0;
+  for (const p of pedidos) { const n = parseInt(p.numero, 10); if (n > max) max = n; }
+  return max + 1;
+}
+function pedidoRef(p) { return '#' + String(p.numero || 0).padStart(4, '0'); }
+
+// ---- Cuadre de repartidores ---------------------------------
+// Efectivo que el repartidor cobró y todavía no ha liquidado,
+// menos los fletes que le corresponden.
+function cuadreRepartidor(pedidos, repartidorId) {
+  const suyos = pedidos.filter((p) => p.repartidorId === repartidorId);
+  const entregados = suyos.filter((p) => p.estado === 'entregado');
+  const porLiquidar = entregados.filter((p) => !p.liquidado);
+
+  let efectivo = 0, otros = 0, fletes = 0;
+  for (const p of porLiquidar) {
+    if (p.metodoPago === 'efectivo') efectivo += pedidoTotal(p);
+    else otros += pedidoTotal(p);
+    if (p.fleteParaRepartidor) fletes += (+p.flete || 0);
+  }
+  return {
+    enRuta: suyos.filter((p) => p.estado === 'ruta').length,
+    entregados: entregados.length,
+    porLiquidar,
+    efectivo,          // plata en mano del repartidor
+    otros,             // cobrado por transferencia / payphone
+    fletes,            // lo que hay que pagarle
+    aRecibir: efectivo - fletes,
+    devueltos: suyos.filter((p) => p.estado === 'devuelto').length,
+  };
+}
+
+function repartidorNombre(reps, id) {
+  const r = (reps || []).find((x) => x.id === id);
+  return r ? r.nombre : '';
+}
+
+// ---- Enlaces y mensajes -------------------------------------
+function mapsLink(direccion, referencia) {
+  const q = [direccion, referencia, 'Guayaquil, Ecuador'].filter(Boolean).join(', ');
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+}
+
+// Confirmación que recibe el cliente por WhatsApp
+function buildPedidoWhatsapp(p, negocio) {
+  const L = [];
+  L.push(`Hola ${p.clienteNombre || ''} 👋`.trim());
+  L.push(`Confirmamos tu pedido *${pedidoRef(p)}*:`);
+  L.push('');
+  (p.items || []).forEach((it) => {
+    L.push(`• ${it.cantidad}× ${it.nombre} — ${money((+it.precio || 0) * (+it.cantidad || 0))}`);
+  });
+  L.push('');
+  L.push(`Subtotal: ${money(pedidoSubtotal(p))}`);
+  if (+p.descuento > 0) L.push(`Descuento: −${money(p.descuento)}`);
+  L.push(`Envío (${zonaLabel(p.zona)}): ${money(p.flete)}`);
+  L.push(`*Total a pagar: ${money(pedidoTotal(p))}*`);
+  L.push('');
+  L.push(`📍 Dirección: ${p.direccion || '—'}`);
+  if (p.referencia) L.push(`🧭 Referencia: ${p.referencia}`);
+  if (p.fechaEntrega) L.push(`🚚 Entrega: ${formatDateFull(p.fechaEntrega)}${p.horario ? ` · ${p.horario}` : ''}`);
+  L.push(`💵 Pago: ${paymentMethodLabel(p.metodoPago)}${p.metodoPago === 'efectivo' ? ' (contra entrega)' : ''}`);
+  L.push('');
+  L.push('Nuestro repartidor te escribe antes de llegar. ¡Gracias por tu compra! 🙌');
+  if (negocio) L.push(`— ${negocio}`);
+  return L.join('\n');
+}
+
+// Hoja de ruta que recibe el repartidor por WhatsApp
+function buildRutaWhatsapp(repartidor, pedidos, fecha) {
+  const L = [];
+  let cobrar = 0, fletes = 0;
+  L.push(`🛵 *RUTA ${fecha ? formatDateFull(fecha).toUpperCase() : 'DE HOY'}*`);
+  L.push(`Repartidor: ${repartidor ? repartidor.nombre : '—'}`);
+  L.push(`Paradas: ${pedidos.length}`);
+  L.push('━━━━━━━━━━━━━━━');
+  pedidos.forEach((p, i) => {
+    const t = pedidoTotal(p);
+    if (p.metodoPago === 'efectivo') cobrar += t;
+    if (p.fleteParaRepartidor) fletes += (+p.flete || 0);
+    L.push('');
+    L.push(`*${i + 1}. ${pedidoRef(p)} · ${p.clienteNombre || 'Sin nombre'}*`);
+    L.push(`📍 ${p.direccion || '—'}`);
+    if (p.referencia) L.push(`🧭 ${p.referencia}`);
+    L.push(`🗺️ ${zonaLabel(p.zona)}`);
+    if (p.clienteTelefono) L.push(`📱 ${p.clienteTelefono}`);
+    L.push(`📦 ${(p.items || []).map((it) => `${it.cantidad}× ${it.nombre}`).join(', ') || '—'}`);
+    L.push(p.metodoPago === 'efectivo'
+      ? `💵 COBRAR ${money(t)} en efectivo`
+      : `✅ YA PAGADO (${paymentMethodLabel(p.metodoPago)}) — no cobrar`);
+    if (p.nota) L.push(`📝 ${p.nota}`);
+  });
+  L.push('');
+  L.push('━━━━━━━━━━━━━━━');
+  L.push(`💵 Total a cobrar: *${money(cobrar)}*`);
+  if (fletes > 0) L.push(`🛵 Tus fletes: ${money(fletes)}`);
+  L.push('Avísame cuando termines para cuadrar. 🙌');
+  return L.join('\n');
+}
+
+// ---- Cierre de caja (ventas en local) -----------------------
+function cierreCaja(pedidos, fechaISO) {
+  const dia = pedidos.filter((p) => p.canal === 'local' && p.fecha === fechaISO && p.estado !== 'cancelado');
+  const porMetodo = {};
+  let total = 0;
+  for (const p of dia) {
+    const t = pedidoTotal(p);
+    total += t;
+    porMetodo[p.metodoPago || 'efectivo'] = (porMetodo[p.metodoPago || 'efectivo'] || 0) + t;
+  }
+  return {
+    fecha: fechaISO,
+    tickets: dia.length,
+    total,
+    promedio: dia.length ? total / dia.length : 0,
+    efectivo: porMetodo.efectivo || 0,
+    porMetodo,
+    unidades: dia.reduce((s, p) => s + pedidoUnidades(p), 0),
+    lista: dia,
+  };
+}
+
+function buildCierreCajaTexto(c) {
+  const L = [];
+  L.push(`🧾 *CIERRE DE CAJA · ${formatDateFull(c.fecha)}*`);
+  L.push('━━━━━━━━━━━━━━━');
+  L.push(`Tickets: ${c.tickets}`);
+  L.push(`Unidades vendidas: ${c.unidades}`);
+  L.push(`Ticket promedio: ${money(c.promedio)}`);
+  L.push('');
+  PAYMENT_METHODS.forEach((m) => {
+    if (c.porMetodo[m.id]) L.push(`${m.label}: ${money(c.porMetodo[m.id])}`);
+  });
+  L.push('');
+  L.push(`*TOTAL DEL DÍA: ${money(c.total)}*`);
+  L.push(`💵 Efectivo en caja: ${money(c.efectivo)}`);
+  return L.join('\n');
+}
+
+// ---- Exportar pedidos ---------------------------------------
+function exportPedidos({ format, pedidos, repartidores, filenameBase }) {
+  const header = [
+    'N°', 'Fecha', 'Canal', 'Cliente', 'Teléfono', 'Zona', 'Dirección', 'Referencia',
+    'Productos', 'Unidades', 'Subtotal', 'Descuento', 'Envío', 'Total',
+    'Pago', 'Repartidor', 'Estado', 'Liquidado', 'Nota',
+  ];
+  const rows = [header, ...pedidos.map((p) => [
+    pedidoRef(p), p.fecha, p.canal === 'local' ? 'Local' : 'Delivery',
+    p.clienteNombre || '', p.clienteTelefono || '',
+    p.canal === 'local' ? 'Local' : zonaLabel(p.zona),
+    p.direccion || '', p.referencia || '',
+    (p.items || []).map((it) => `${it.cantidad}x ${it.nombre}`).join(' | '),
+    pedidoUnidades(p),
+    pedidoSubtotal(p).toFixed(2), (+p.descuento || 0).toFixed(2), (+p.flete || 0).toFixed(2),
+    pedidoTotal(p).toFixed(2),
+    paymentMethodLabel(p.metodoPago),
+    repartidorNombre(repartidores, p.repartidorId),
+    pedidoEstadoMeta(p.estado).label,
+    p.liquidado ? 'Sí' : 'No',
+    p.nota || '',
+  ])];
+  const base = filenameBase || `life-manager_pedidos_${todayISO()}`;
+  if (format === 'csv') downloadCSV(`${base}.csv`, rows);
+  else downloadXLS(`${base}.xls`, 'Pedidos', rows);
+}
+
+// Convierte un pedido entregado/vendido en un movimiento de venta
+function pedidoToTransaction(p) {
+  return {
+    id: 'tx_ped_' + p.id,
+    tipo: 'venta',
+    categoria: 'producto',
+    concepto: p.canal === 'local'
+      ? `Venta en local ${pedidoRef(p)}${p.clienteNombre ? ` · ${p.clienteNombre}` : ''}`
+      : `Pedido delivery ${pedidoRef(p)} · ${p.clienteNombre || 'sin nombre'}`,
+    monto: +pedidoTotal(p).toFixed(2),
+    fecha: p.canal === 'local' ? p.fecha : (p.fechaEntregaReal || p.fechaEntrega || p.fecha),
+    cantidad: pedidoUnidades(p),
+    clienteId: p.clienteId || '',
+    productoId: (p.items && p.items.length === 1 && p.items[0].productoId) ? p.items[0].productoId : '',
+    nota: [(p.canal === 'local' ? 'Local' : zonaLabel(p.zona)), paymentMethodLabel(p.metodoPago), p.nota].filter(Boolean).join(' · '),
+    origen: 'pedido',
+    pedidoId: p.id,
+  };
+}
+
 Object.assign(window, {
   emptyState, loadState, saveState, newId,
   startOfPeriod, endOfPeriod, shiftPeriod,
@@ -713,4 +964,10 @@ Object.assign(window, {
   DEBT_DIRECTIONS, debtPaid, debtBalance, debtStatus, DEBT_STATUS_META, debtStatusMeta, buildDebtReminder,
   // Reporte por cliente
   buildClientReport, buildClientReportHTML, clientReportTotals, projectPagoEstado,
+  // Pedidos
+  ZONAS_GYE, zonaMeta, zonaLabel, PEDIDO_ESTADOS, pedidoEstadoMeta, pedidoAbierto,
+  pedidoSubtotal, pedidoUnidades, pedidoTotal, pedidoNeto, pedidoItemsResumen,
+  nextPedidoNumero, pedidoRef, cuadreRepartidor, repartidorNombre, mapsLink,
+  buildPedidoWhatsapp, buildRutaWhatsapp, cierreCaja, buildCierreCajaTexto,
+  exportPedidos, pedidoToTransaction,
 });

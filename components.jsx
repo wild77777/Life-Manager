@@ -55,12 +55,13 @@ function Sparkline({ values, height = 28, stroke = 'var(--ink)', fill = false })
 function Header({ view, setView, dataCount, onOpenAdd, onOpenExport }) {
   const links = [
     { id: 'resumen',   label: 'Resumen' },
+    { id: 'pedidos',   label: 'Pedidos' },
     { id: 'movs',      label: 'Movimientos' },
     { id: 'inv',       label: 'Inventario' },
     { id: 'contactos', label: 'Contactos' },
     { id: 'deudas',    label: 'Deudas' },
-    { id: 'reportes',  label: 'Reportes' },
     { id: 'crm',       label: 'CRM' },
+    { id: 'reportes',  label: 'Reportes' },
   ];
   return (
     <header className="header">
@@ -69,7 +70,7 @@ function Header({ view, setView, dataCount, onOpenAdd, onOpenExport }) {
           <span className="brand-mark" aria-hidden="true"></span>
           <span className="brand-word">Life Manager</span>
         </button>
-        <nav className="nav">
+        <nav className="nav" aria-label="Secciones">
           {links.map((l) => (
             <button
               key={l.id}
@@ -84,10 +85,10 @@ function Header({ view, setView, dataCount, onOpenAdd, onOpenExport }) {
           <span className="header-count">{dataCount.toLocaleString('es-ES')} movs</span>
           <button className="btn-ghost header-export" onClick={onOpenExport} title="Exportar a Excel o CSV">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5v8M3.5 6L7 9.5 10.5 6M2 12h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            Exportar
+            <span className="btn-text">Exportar</span>
           </button>
-          <button className="btn-primary header-add" onClick={onOpenAdd}>
-            <span aria-hidden="true">+</span> Nueva transacción
+          <button className="btn-primary header-add" onClick={onOpenAdd} title="Nueva transacción">
+            <span aria-hidden="true">+</span> <span className="btn-text">Nueva transacción</span>
           </button>
         </div>
       </div>

@@ -13,7 +13,7 @@ function App() {
 
   // Persisted state ------------------------------------------
   const [state, setState] = useState(() => loadState());
-  const { transactions, products, clients, suppliers, crmClients, crmProjects, debts, bankAccount } = state;
+  const { transactions, products, clients, suppliers, crmClients, crmProjects, debts, pedidos, repartidores, bankAccount } = state;
 
   useEffect(() => { saveState(state); }, [state]);
 
@@ -242,6 +242,124 @@ function App() {
     flash('Abono eliminado.');
   }, [flash]);
 
+  // ---- Pedidos: sincronización con movimientos e inventario ----
+  // Un pedido genera una venta cuando se entrega (delivery) o al
+  // registrarse (local). Si se revierte, la venta se retira sola.
+  function debeFacturar(p) {
+    if (!p) return false;
+    if (p.canal === 'local') return p.estado !== 'cancelado';
+    return p.estado === 'entregado';
+  }
+
+  function syncPedido(s, prev, next) {
+    const prevOn = debeFacturar(prev);
+    const nextOn = debeFacturar(next);
+    let transactions = s.transactions;
+    let products = s.products;
+    const id = (next || prev).id;
+    const txId = 'tx_ped_' + id;
+
+    const moveStock = (p, dir) => {
+      for (const it of (p.items || [])) {
+        if (!it.productoId) continue;
+        products = products.map((pr) => pr.id === it.productoId
+          ? { ...pr, stock: Math.max(0, (+pr.stock || 0) + dir * (+it.cantidad || 0)) }
+          : pr);
+      }
+    };
+
+    if (prevOn) { transactions = transactions.filter((t) => t.id !== txId); moveStock(prev, +1); }
+    if (nextOn) {
+      transactions = [pedidoToTransaction(next), ...transactions.filter((t) => t.id !== txId)];
+      moveStock(next, -1);
+    }
+    transactions = [...transactions].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+    return { transactions, products };
+  }
+
+  const savePedido = useCallback((p, isEdit) => {
+    setState((s) => {
+      const prev = isEdit ? s.pedidos.find((x) => x.id === p.id) : null;
+      const pedidosNext = isEdit ? s.pedidos.map((x) => (x.id === p.id ? p : x)) : [p, ...s.pedidos];
+      return { ...s, pedidos: pedidosNext, ...syncPedido(s, prev, p) };
+    });
+    flash(isEdit ? 'Pedido actualizado.' : `${p.canal === 'local' ? 'Venta' : 'Pedido'} ${pedidoRef(p)} registrado por ${money(pedidoTotal(p))}.`);
+  }, [flash]);
+
+  const deletePedido = useCallback((id) => {
+    setState((s) => {
+      const prev = s.pedidos.find((x) => x.id === id);
+      return { ...s, pedidos: s.pedidos.filter((x) => x.id !== id), ...syncPedido(s, prev, null) };
+    });
+    flash('Pedido eliminado.');
+  }, [flash]);
+
+  const changePedidoEstado = useCallback((id, estado) => {
+    setState((s) => {
+      const prev = s.pedidos.find((x) => x.id === id);
+      if (!prev) return s;
+      const next = {
+        ...prev,
+        estado,
+        fechaEntregaReal: estado === 'entregado' ? (prev.fechaEntregaReal || todayISO()) : '',
+        liquidado: estado === 'entregado' ? !!prev.liquidado : false,
+      };
+      return { ...s, pedidos: s.pedidos.map((x) => (x.id === id ? next : x)), ...syncPedido(s, prev, next) };
+    });
+    const meta = pedidoEstadoMeta(estado);
+    flash(`Pedido marcado como ${meta.label.toLowerCase()}.`);
+  }, [flash]);
+
+  const assignRepartidor = useCallback((id, repartidorId) => {
+    setState((s) => ({
+      ...s,
+      pedidos: s.pedidos.map((p) => p.id === id ? { ...p, repartidorId } : p),
+    }));
+  }, []);
+
+  const saveRepartidor = useCallback((r, isEdit) => {
+    setState((s) => ({
+      ...s,
+      repartidores: isEdit ? s.repartidores.map((x) => (x.id === r.id ? r : x)) : [...s.repartidores, r],
+    }));
+    flash(isEdit ? 'Repartidor actualizado.' : 'Repartidor agregado.');
+  }, [flash]);
+
+  const deleteRepartidor = useCallback((id) => {
+    setState((s) => ({
+      ...s,
+      repartidores: s.repartidores.filter((x) => x.id !== id),
+      pedidos: s.pedidos.map((p) => p.repartidorId === id ? { ...p, repartidorId: '' } : p),
+    }));
+    flash('Repartidor eliminado.');
+  }, [flash]);
+
+  // Cierra el cuadre: marca los pedidos como liquidados y, si se pide,
+  // registra los fletes del repartidor como gasto de transporte.
+  const liquidarRepartidor = useCallback((rep, lista, fletes) => {
+    const ids = new Set(lista.map((p) => p.id));
+    setState((s) => {
+      const next = {
+        ...s,
+        pedidos: s.pedidos.map((p) => ids.has(p.id) ? { ...p, liquidado: true, fechaLiquidacion: todayISO() } : p),
+      };
+      if (fletes > 0) {
+        const tx = {
+          id: newId('tx'),
+          tipo: 'gasto',
+          categoria: 'transporte',
+          concepto: `Fletes de ${rep.nombre} · ${lista.length} entregas`,
+          monto: +(+fletes).toFixed(2),
+          fecha: todayISO(),
+          nota: 'Cuadre de delivery',
+        };
+        next.transactions = [tx, ...s.transactions].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+      }
+      return next;
+    });
+    flash(`Cuadre de ${rep.nombre} cerrado.`);
+  }, [flash]);
+
   // ---- Export ---------------------------------------------
   const openExport = useCallback(() => setExportOpen(true), []);
 
@@ -356,6 +474,20 @@ function App() {
             onDelete={deleteDebt}
             onAddPayment={addDebtPayment}
             onDeletePayment={deleteDebtPayment}
+            onConfirm={(cfg) => setConfirm({ ...cfg, onConfirm: () => { cfg.onConfirm(); setConfirm(null); } })}
+          />
+        )}
+        {view === 'pedidos' && (
+          <PedidosView
+            pedidos={pedidos} repartidores={repartidores} products={products} clients={clients}
+            onSavePedido={savePedido}
+            onDeletePedido={deletePedido}
+            onChangeEstado={changePedidoEstado}
+            onAssign={assignRepartidor}
+            onSaveRepartidor={saveRepartidor}
+            onDeleteRepartidor={deleteRepartidor}
+            onLiquidar={liquidarRepartidor}
+            onToast={flash}
             onConfirm={(cfg) => setConfirm({ ...cfg, onConfirm: () => { cfg.onConfirm(); setConfirm(null); } })}
           />
         )}
